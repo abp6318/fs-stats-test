@@ -131,6 +131,7 @@ export async function getOpenDataStyleStatistics(
   const batches = chunk(numericOrDateOrObjectIdFields, STATS_BATCH_SIZE);
 
   // 3. For each batch, request statistics from the server
+  let batchIndex = 0;
   for (const batch of batches) {
     const statsDefs: any[] = [];
     for (const field of batch) {
@@ -172,25 +173,48 @@ export async function getOpenDataStyleStatistics(
     const encoded = encodeURIComponent(JSON.stringify(statsDefs));
     const url =
       `${featureLayerUrl}/query?f=json` +
-      `&where=1=1` +
+      `&where=1%3D1` +
       `&returnGeometry=false` +
       `&outStatistics=${encoded}`;
     const resp = await getJson(url);
+    if (batchIndex === 0) {
+      // Log the full response for the first batch for debugging
+      console.warn("DEBUG: Full response for first stats batch:", JSON.stringify(resp, null, 2));
+    }
+    batchIndex++;
+    if (!resp.features || resp.features.length === 0) {
+      console.warn("No features returned for stats batch query", url);
+    }
     const attrs = resp?.features?.[0]?.attributes || {};
 
-    // Merge statistics into output
-    for (const key in attrs) {
-      const match = key.match(/(.+)_([a-z]+)$/);
-      if (!match) continue;
-      const fieldName = match[1];
-      const statType = match[2];
-      const value = attrs[key];
-      if (output.objectid[fieldName]) {
-        (output.objectid[fieldName] as any)[statType] = value;
-      } else if (output.numeric[fieldName]) {
-        (output.numeric[fieldName] as any)[statType] = value;
-      } else if (output.date[fieldName]) {
-        (output.date[fieldName] as any)[statType] = value;
+    // Merge statistics into output, ensuring all stat keys are present
+    for (const field of batch) {
+      const name = field.name;
+      const type = field.type;
+      const isObjectId = type === "esriFieldTypeOID";
+      const isNumeric =
+        type === "esriFieldTypeInteger" ||
+        type === "esriFieldTypeSmallInteger" ||
+        type === "esriFieldTypeDouble" ||
+        type === "esriFieldTypeSingle";
+      const isDate = type === "esriFieldTypeDate";
+
+      // Stat keys to expect
+      const statKeys = isDate
+        ? ["min", "max", "count"]
+        : ["min", "max", "avg", "sum", "count"];
+
+      for (const statKey of statKeys) {
+        // ArcGIS returns stat keys in uppercase (e.g., DUEDATE_MIN)
+        const attrKey = `${name}_${statKey.toUpperCase()}`;
+        const value = attrs.hasOwnProperty(attrKey) ? attrs[attrKey] : null;
+        if (isObjectId) {
+          (output.objectid[name] as any)[statKey] = value;
+        } else if (isNumeric) {
+          (output.numeric[name] as any)[statKey] = value;
+        } else if (isDate) {
+          (output.date[name] as any)[statKey] = value;
+        }
       }
     }
   }
@@ -203,6 +227,7 @@ export async function getOpenDataStyleStatistics(
       `${featureLayerUrl}/query?f=json` +
       `&where=1%3D1` +
       `&returnGeometry=false` +
+      `&outFields=*` +
       `&groupByFieldsForStatistics=${name}` +
       `&outStatistics=` +
       encodeURIComponent(
@@ -215,14 +240,17 @@ export async function getOpenDataStyleStatistics(
         ])
       );
     const response = await getJson(groupQuery);
+    if (!response.features || response.features.length === 0) {
+      console.warn("No features returned for string groupBy query", groupQuery);
+    }
     const values =
       response.features?.map((f: any) => ({
         value: f.attributes[name],
-        count: f.attributes.value_count,
+        count: typeof f.attributes.value_count === "number" ? f.attributes.value_count : 1,
       })) || [];
     output.string[name] = {
       values,
-      count: values.reduce((sum: number, v: StringStatsValue) => sum + v.count, 0),
+      count: values.reduce((sum: number, v: StringStatsValue) => sum + (typeof v.count === "number" ? v.count : 1), 0),
       uniqueCount: values.length,
     };
   }

@@ -3,8 +3,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 async function main() {
+  // const url =
+  //   "https://servicesqa.arcgis.com/Xj56SBi2udA78cC9/arcgis/rest/services/US_States_Generalized/FeatureServer/0";
   const url =
-    "https://servicesqa.arcgis.com/Xj56SBi2udA78cC9/arcgis/rest/services/US_States_Generalized/FeatureServer/0";
+    "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Environment_Air_Quality_WebMercator/MapServer/1";
 
   console.log("Fetching statistics...\n");
 
